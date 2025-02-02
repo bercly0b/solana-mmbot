@@ -1,5 +1,5 @@
 import { JupiterClient } from '../api/jupiter';
-import { SOL_MINT_ADDRESS, MBC_MINT_ADDRESS, USDC_MINT_ADDRESS } from '../constants/constants';
+import { SOL_MINT_ADDRESS, PAIR_MINT_ADDRESS, USDC_MINT_ADDRESS } from '../constants/constants';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import Decimal from 'decimal.js';
 import { fromNumberToLamports } from '../utils/convert';
@@ -10,7 +10,7 @@ import { sleep } from '../utils/sleep';
  * Class for market making basic strategy
  */
 export class MarketMaker {
-    mcbToken: { address: string, symbol: string, decimals: number }
+    pairToken: { address: string, symbol: string, decimals: number }
     solToken: { address: string, symbol: string, decimals: number }
     usdcToken: { address: string, symbol: string, decimals: number }
     waitTime: number
@@ -23,7 +23,7 @@ export class MarketMaker {
      */
     constructor() {
         // Read decimals from the token mint addresses
-        this.mcbToken = { address: MBC_MINT_ADDRESS, symbol: 'MBC', decimals: 9 };
+        this.pairToken = { address: PAIR_MINT_ADDRESS, symbol: 'BBT', decimals: 9 };
         this.solToken = { address: SOL_MINT_ADDRESS, symbol: 'SOL', decimals: 9 };
         this.usdcToken = { address: USDC_MINT_ADDRESS, symbol: 'USDC', decimals: 6 };
         this.waitTime = 60000; // 1 minute
@@ -39,7 +39,7 @@ export class MarketMaker {
      * @returns {Promise<void>} - Promise object
      */
     async runMM(jupiterClient: JupiterClient, enableTrading: Boolean = false): Promise<void> {
-        const tradePairs = [{ token0: this.solToken, token1: this.mcbToken }];
+        const tradePairs = [{ token0: this.solToken, token1: this.pairToken }];
 
         while (true) {
             for (const pair of tradePairs) {
@@ -57,11 +57,11 @@ export class MarketMaker {
      * @param {any} pair - Pair object
      * @param {boolean} enableTrading - Enable trading
      * @returns {Promise<void>} - Promise object
-     * 
+     *
      **/
     async evaluateAndExecuteTrade(jupiterClient: JupiterClient, pair: any, enableTrading: Boolean): Promise<void> {
         const token0Balance = await this.fetchTokenBalance(jupiterClient, pair.token0); // SOL balance
-        const token1Balance = await this.fetchTokenBalance(jupiterClient, pair.token1); // MBC balance
+        const token1Balance = await this.fetchTokenBalance(jupiterClient, pair.token1); // pair token balance
 
         // Log current token balances
         console.log(`Token0 balance (in ${pair.token0.symbol}): ${token0Balance.toString()}`);
@@ -69,20 +69,20 @@ export class MarketMaker {
 
         // Get USD value for both tokens
         const tradeNecessity = await this.determineTradeNecessity(jupiterClient, pair, token0Balance, token1Balance);
-        const { tradeNeeded, solAmountToTrade, mbcAmountToTrade } = tradeNecessity!;
+        const { tradeNeeded, solAmountToTrade, pairAmountToTrade } = tradeNecessity!;
 
         if (tradeNeeded) {
             console.log('Trade needed');
             if (solAmountToTrade.gt(0)) {
-                console.log(`Trading ${solAmountToTrade.toString()} SOL for MBC...`);
+                console.log(`Trading ${solAmountToTrade.toString()} SOL for ${this.pairToken.symbol}...`);
                 const lamportsAsString = fromNumberToLamports(solAmountToTrade.toNumber(), pair.token0.decimals).toString();
                 const quote = await jupiterClient.getQuote(pair.token0.address, pair.token1.address, lamportsAsString, this.slippageBps);
                 const swapTransaction = await jupiterClient.getSwapTransaction(quote);
                 if (enableTrading) await jupiterClient.executeSwap(swapTransaction);
                 else console.log('Trading disabled');
-            } else if (mbcAmountToTrade.gt(0)) {
-                console.log(`Trading ${mbcAmountToTrade.toString()} MBC for SOL...`);
-                const lamportsAsString = fromNumberToLamports(mbcAmountToTrade.toNumber(), pair.token1.decimals).toString();
+            } else if (pairAmountToTrade.gt(0)) {
+                console.log(`Trading ${pairAmountToTrade.toString()} ${this.pairToken.symbol} for SOL...`);
+                const lamportsAsString = fromNumberToLamports(pairAmountToTrade.toNumber(), pair.token1.decimals).toString();
                 const quote = await jupiterClient.getQuote(pair.token1.address, pair.token0.address, lamportsAsString, this.slippageBps);
                 const swapTransaction = await jupiterClient.getSwapTransaction(quote);
                 if (enableTrading) await jupiterClient.executeSwap(swapTransaction);
@@ -96,7 +96,7 @@ export class MarketMaker {
     /**
      * Determines the necessity of a trade based on the current balance of two tokens and their USD values.
      * The goal is to maintain a 50/50 ratio of the total USD value of each token.
-     * 
+     *
      * @param jupiterClient An instance of JupiterClient used to fetch USD values of tokens.
      * @param pair An object representing the token pair to be evaluated, containing `token0` and `token1` properties.
      * @param token0Balance The current balance of `token0`.
@@ -115,7 +115,7 @@ export class MarketMaker {
 
 
         let solAmountToTrade = new Decimal(0);
-        let mbcAmountToTrade = new Decimal(0);
+        let pairAmountToTrade = new Decimal(0);
         let tradeNeeded = false;
 
         console.log(`${pair.token0.symbol} value: ${token0Value.toString()}`);
@@ -129,16 +129,16 @@ export class MarketMaker {
         } else if (token1Value.gt(targetValuePerToken)) {
             // If token0's value is below the minimum tolerated value, trade some token1 for it
             const valueDiff = token1Value.sub(targetValuePerToken);
-            mbcAmountToTrade = valueDiff.div(token1Price);
+            pairAmountToTrade = valueDiff.div(token1Price);
             tradeNeeded = true;
         }
 
         const minimumTradeAmount = new Decimal(0.01);
-        if (solAmountToTrade.lt(minimumTradeAmount) && mbcAmountToTrade.lt(minimumTradeAmount)) {
+        if (solAmountToTrade.lt(minimumTradeAmount) && pairAmountToTrade.lt(minimumTradeAmount)) {
             tradeNeeded = false;
         }
 
-        return { tradeNeeded, solAmountToTrade, mbcAmountToTrade };
+        return { tradeNeeded, solAmountToTrade, pairAmountToTrade };
     }
 
     /**
