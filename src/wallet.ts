@@ -1,13 +1,10 @@
 import fs from 'fs';
 import { Keypair } from '@solana/web3.js';
 import { derivePath } from 'ed25519-hd-key';
-import * as bip39 from 'bip39';
 import * as nacl from 'tweetnacl';
-import { homedir } from 'os';
 import * as path from 'path';
 
-const USER_HOME = homedir();
-const USER_KEYPAIR_PATH = path.join(USER_HOME, '.config/solana/id.json');
+const USER_KEYPAIR_PATH = path.join(__dirname, '..', 'solana-wallet.json');
 
 // Load keypair from file
 function loadKeypairFromFile(filePath: string): Keypair {
@@ -30,13 +27,6 @@ function deriveKeypairFromSeed(seed: Buffer, derivationPath: string): Keypair {
     return Keypair.fromSecretKey(new Uint8Array([...keypair.secretKey]));
 }
 
-// Load keypair from mnemonic
-function loadKeypairFromMnemonic(mnemonic: string, derivationPath: string = "m/44'/501'/0'/0'"): Keypair {
-    console.log('Mnemonic:', mnemonic);
-    const seed = bip39.mnemonicToSeedSync(mnemonic);
-    return deriveKeypairFromSeed(seed, derivationPath);
-}
-
 // Get user keypair, optionally using a derivation path
 export function getUserKeypair(derivationPath?: string): Keypair {
     const keypair = loadKeypairFromFile(USER_KEYPAIR_PATH);
@@ -49,9 +39,7 @@ export function getUserKeypair(derivationPath?: string): Keypair {
 
 // Main function to load keypair
 export function loadKeypair(): Keypair {
-    if (process.env.SOLANA_MNEMONIC) {
-        return loadKeypairFromMnemonic(process.env.SOLANA_MNEMONIC);
-    } else if (fs.existsSync(USER_KEYPAIR_PATH)) {
+    if (fs.existsSync(USER_KEYPAIR_PATH)) {
         return getUserKeypair();
     } else {
         console.error('Private key file or mnemonic not found');
