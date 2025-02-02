@@ -1,3 +1,4 @@
+import './console-interceptor';
 import dotenv from 'dotenv';
 import { JupiterClient } from './api/jupiter';
 import { setupSolanaConnection } from './api/solana';
